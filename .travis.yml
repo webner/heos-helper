@@ -36,7 +36,7 @@ jobs:
         skip_cleanup: true
         provider: releases
         api_key:
-          secure: VKXgfa0YHD7jKFpwSdmdMAcopwB83qWNGyoxChKROrJmdfpFz6DPHi8hNDn07hLirx4VdfSys5PNnaNtTILiiRgmhMakicpFyDT/mfMMIIVq+PzpnMKNS7YiIlnE8xQKCWjaYOA9GTcpRvbTJgADWf8IAPuTZzbbP+sW1nxi3GibtFDDBu7Ar59WwCEpMyd+y1j6PNqC+N6ABBmXzpBkGwMJLGk73nj22n3PqWXTU9bEO2ZNhNBtWG+ycEh57/+X0XNZUN/mEpWcrnalbFYC77Q3yQruxVA6WR+7eJ3qXMTc8UvRjGjmetEvpMRYrzN4WRRjZ5LMqa7b2yMOnHp3EimssQy+kD0PpSP5x//jy2xRRYjov+EupW8qfUslhUbiBgwH7J/H46NIb5klF1sj84TC6nTY0qI/OkCJoMcUsV/HEAMq+PJ9Df5PfBNPuvCky22e23ECbL2is6pr1V0rMf2U24IAPM9f2gRwvezMncQmR10rIGIC+4sZRQLqJTrdEJj2KkoBMCPzJhKWOccTIFLllhDNp0fs0URYypYW2F3J0EqEmGcbeeC8j5KCqQ3fmzF1s8snxZaCQ+mdA9OGIS3KJfHenhw5+0URs1zZ9NO1pRfomzZey7Sd8xQ9k1OUk7CL5NNEroWubPPm9oT6HiTFpKmUEBUfFa3A8hSaRco=
+          secure: Zolxje4nGBwG3A/xYzirphNRmmU/KQqcAG692YZWM+MN+1ONTsY74g6EYLsmurGLQWDC/FA3Jh+hWwvMAhk0a4vTZSkQrSB/x65J07ZhS27vtpuD/ReoW9VtQnGyTgCsrBX6u/i7ZA20DVIEk51wlybW20+ma57ZyzsmMJ6PcEqZpWYP6l11NYbxuwOYaiJCkinfVT41EQx2Mq/9q6JfzaiMZu28N57vEyAxx/ORHfvzDx1vU0ebvFj5LpHJRBIJGOk5tsjoVCfHdBmp+dG9usKElg3IFUMMhpM5gJrdNcQsmd6XloEJ4qI35Ic3JE679BunZ/ilk2BS+FtmcVTfkLXYocgE1t3yvsfcwb8B/Evij+vS8scT+f6efL01g3EOu+c2+4xuOa72RWMy6k1a1H7m3n1uNZ5W9+GLSHk4PuPc9YO/EgEk8Wt5XRO+8tjHmTga6kyTFRQgNafJH4CAKLpIy/kOOH+A1ViH5/a0GZB9Aqy3/5vanCyCneTlcIBvMAxmdKzCHkH4C7VPsgkrL6Ha4YRysIvzBY3c/CjbMTiC44b5YizI2DovZSyuYGhWWuq4WqUke4Ticr+9iqaiLN2bFTkKh0/8eFDjblvgY+s3WaedPj4RnuyKiPDWCzAD+yFv2weRKv4C+ladU8qdaN/zLQsvQCk9IsfoO2EW0qY=
         file:
           - broker-heos_linux_amd64
           - broker-heos_linux_arm
