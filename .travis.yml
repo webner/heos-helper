@@ -1,0 +1,44 @@
+language: go
+go:
+  - 1.7
+  - 1.8
+  - 1.9
+
+env:
+  - DEP_VERSION="0.3.2"
+
+before_install:
+  - go get -u golang.org/x/tools/cmd/goimports
+  - curl -L -s https://github.com/golang/dep/releases/download/v${DEP_VERSION}/dep-linux-amd64 -o $GOPATH/bin/dep
+  - chmod +x $GOPATH/bin/dep
+
+install:
+  - dep ensure
+  - dep prune
+
+script:
+  - goimports -d $(find . -type f -name '*.go' -not -path "./vendor/*")
+  - go tool vet $(find . -type f -name '*.go' -not -path "./vendor/*")
+
+stages:
+  - test
+  - name: deploy
+    if: tag IS present
+
+jobs:
+  include:
+    - stage: deploy
+      go: 1.9
+      script:
+        - GOOS=linux GOARCH=amd64 go build -o broker-heos_linux_amd64
+        - GOOS=linux GOARCH=arm go build -o broker-heos_linux_arm
+      deploy:
+        skip_cleanup: true
+        provider: releases
+        api_key:
+          secure: VKXgfa0YHD7jKFpwSdmdMAcopwB83qWNGyoxChKROrJmdfpFz6DPHi8hNDn07hLirx4VdfSys5PNnaNtTILiiRgmhMakicpFyDT/mfMMIIVq+PzpnMKNS7YiIlnE8xQKCWjaYOA9GTcpRvbTJgADWf8IAPuTZzbbP+sW1nxi3GibtFDDBu7Ar59WwCEpMyd+y1j6PNqC+N6ABBmXzpBkGwMJLGk73nj22n3PqWXTU9bEO2ZNhNBtWG+ycEh57/+X0XNZUN/mEpWcrnalbFYC77Q3yQruxVA6WR+7eJ3qXMTc8UvRjGjmetEvpMRYrzN4WRRjZ5LMqa7b2yMOnHp3EimssQy+kD0PpSP5x//jy2xRRYjov+EupW8qfUslhUbiBgwH7J/H46NIb5klF1sj84TC6nTY0qI/OkCJoMcUsV/HEAMq+PJ9Df5PfBNPuvCky22e23ECbL2is6pr1V0rMf2U24IAPM9f2gRwvezMncQmR10rIGIC+4sZRQLqJTrdEJj2KkoBMCPzJhKWOccTIFLllhDNp0fs0URYypYW2F3J0EqEmGcbeeC8j5KCqQ3fmzF1s8snxZaCQ+mdA9OGIS3KJfHenhw5+0URs1zZ9NO1pRfomzZey7Sd8xQ9k1OUk7CL5NNEroWubPPm9oT6HiTFpKmUEBUfFa3A8hSaRco=
+        file:
+          - broker-heos_linux_amd64
+          - broker-heos_linux_arm
+        on:
+          tags: true

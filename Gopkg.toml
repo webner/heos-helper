@@ -1,0 +1,15 @@
+[[constraint]]
+  branch = "master"
+  name = "github.com/jessevdk/go-flags"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/coreos/go-systemd"
+
+[[constraint]]
+  name = "github.com/eclipse/paho.mqtt.golang"
+  branch = "master"
+
+[[constraint]]
+  name = "github.com/martins-home-automation/libs"
+  branch = "master"
