@@ -3,52 +3,74 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:ae5abd668058c13b3772395a7092c62e78842004559046c2c72ac844092471d7"
   name = "github.com/coreos/go-systemd"
   packages = ["daemon"]
+  pruneopts = ""
   revision = "d7b55e18be11bfd0d09b6bd1be308332818b4f46"
 
 [[projects]]
   branch = "master"
+  digest = "1:25824c11dcb29779bebf5df0a58e359b1706c297ac380e549bec17257f58a48b"
   name = "github.com/eclipse/paho.mqtt.golang"
   packages = [
     ".",
-    "packets"
+    "packets",
   ]
+  pruneopts = ""
   revision = "20fd5cb1c3bb6bf5419a5fc2627b210d0d4ca2ce"
 
 [[projects]]
+  digest = "1:a3c01bbe8766cbce019cdb900aa51460a6f7bd4266a18d80722dc92297302bc3"
+  name = "github.com/gorilla/mux"
+  packages = ["."]
+  pruneopts = ""
+  revision = "a7962380ca08b5a188038c69871b8d3fbdf31e89"
+  version = "v1.7.0"
+
+[[projects]]
   branch = "master"
+  digest = "1:e82396dc89a119a1dee77769493f363d80a3d8a24f577010372f11d50a19813e"
   name = "github.com/jessevdk/go-flags"
   packages = ["."]
+  pruneopts = ""
   revision = "f88afde2fa19a30cf50ba4b05b3d13bc6bae3079"
 
 [[projects]]
   branch = "master"
+  digest = "1:c9e566068d061c99424b2e34fd78b7769dae5253943c7411cf3ef7eff0779937"
   name = "github.com/martins-home-automation/libs"
-  packages = [
-    "mediacenter",
-    "mqtthelper"
-  ]
+  packages = ["mqtthelper"]
+  pruneopts = ""
   revision = "8f93cad3a0e86b2f6595d1228cde3422087c684b"
 
 [[projects]]
   branch = "master"
+  digest = "1:58977d25cdcfe647173e2282e77f88797750d8124ad7417174afcaea301d4a6a"
   name = "golang.org/x/net"
   packages = [
     "proxy",
-    "websocket"
+    "websocket",
   ]
+  pruneopts = ""
   revision = "6078986fec03a1dcc236c34816c71b0e05018fda"
 
 [[projects]]
+  digest = "1:5fe876313b07628905b2181e537faabe45032cb9c79c01b49b51c25a0a40040d"
   name = "gopkg.in/yaml.v2"
   packages = ["."]
+  pruneopts = ""
   revision = "7f97868eec74b32b0982dd158a51a446d1da7eb5"
   version = "v2.1.1"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "4d4e07fc155bffcb72e57b49e52548534d54ef302fea4d29a217967031390d2b"
+  input-imports = [
+    "github.com/coreos/go-systemd/daemon",
+    "github.com/gorilla/mux",
+    "github.com/martins-home-automation/libs/mqtthelper",
+    "gopkg.in/yaml.v2",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1

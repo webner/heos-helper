@@ -27,13 +27,19 @@ type Response struct {
 type Player struct {
 	Name         string `json:"name"`
 	PID          int    `json:"pid"`
-	GID          string `json:"gid"`
+	GID          int    `json:"gid"`
 	Model        string `json:"model"`
 	Version      string `json:"version"`
 	Network      string `json:"network"`
 	Lineout      int    `json:"lineout"`
 	Control      string `json:"control"`
 	SerialNumber string `json:"serial"`
+}
+
+type PlayerVolume struct {
+	PID   int    `json:"pid"`
+	Level int    `json:"level"`
+	Mute  string `json:"mute"`
 }
 
 type Playback struct {
@@ -130,7 +136,7 @@ type HEOS struct {
 func NewHEOS(uri string) *HEOS {
 	return &HEOS{
 		uri:           uri,
-		EventCh:       make(chan Event),
+		EventCh:       make(chan Event, 10),
 		responseWaits: make(map[string]*responseWait),
 	}
 }
@@ -141,25 +147,45 @@ func (h *HEOS) IsConnected() bool {
 
 func (h *HEOS) Connect() error {
 	if !h.IsConnected() {
-		c, err := net.Dial("tcp", h.uri)
-		if err != nil {
-			return err
+
+		hosts := strings.Split(h.uri, ",")
+		h.conn = nil
+
+		var lastErr error
+
+		for _, host := range hosts {
+
+			log.Printf("Connecting to %v", host)
+			c, err := net.DialTimeout("tcp", host, time.Duration(time.Second*3))
+			if err != nil {
+				log.Printf("Connecting failed to %v: %v", host, err)
+				time.Sleep(time.Second)
+				lastErr = err
+				continue
+			}
+			log.Printf("Connecting established to %v", host)
+			h.conn = c
+			break
 		}
 
-		h.conn = c
+		if h.conn == nil {
+			return lastErr
+		}
+
+		disconnectChan := make(chan bool)
 
 		go func() {
+			log.Printf("Receive function started")
+			defer close(disconnectChan)
+
 			result := make([]byte, 0)
 			buf := make([]byte, 30)
 
 			for h.IsConnected() {
-				h.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 				n, err := h.conn.Read(buf)
 				if err != nil {
+					log.Printf("Receive error %v", err)
 					h.Disconnect()
-					h.EventCh <- Event{
-						Type: "disconnected",
-					}
 					break
 				}
 				if n != 0 {
@@ -207,17 +233,27 @@ func (h *HEOS) Connect() error {
 					}
 				}
 			}
+			log.Printf("Receive function stopped")
 		}()
 
 		go func() {
-			t := time.NewTicker(2 * time.Second)
+			log.Printf("Heart beat function started")
+			t := time.NewTicker(3 * time.Second)
 			defer t.Stop()
 			for h.IsConnected() {
-				<-t.C
-				if err := h.HeartBeat(); err != nil {
-					log.Printf("Heart beat failed: %s", err)
+				select {
+				case <-disconnectChan:
+					log.Printf("disconnectChan triggered")
+					break
+				case <-t.C:
+					if err := h.HeartBeat(); err != nil {
+						log.Printf("Heart beat failed: %s", err)
+						h.Disconnect()
+						break
+					}
 				}
 			}
+			log.Printf("Heart beat function stopped")
 		}()
 	}
 
@@ -228,6 +264,9 @@ func (h *HEOS) Disconnect() {
 	if h.IsConnected() {
 		h.conn.Close()
 		h.conn = nil
+		h.EventCh <- Event{
+			Type: "disconnected",
+		}
 	}
 }
 
@@ -254,7 +293,6 @@ func (h *HEOS) GetPlayers() ([]Player, error) {
 	if err != nil {
 		return players, err
 	}
-
 	err = json.Unmarshal(r.Payload, &players)
 	return players, err
 }
@@ -278,6 +316,50 @@ func (h *HEOS) SetPlayState(pid int, state string) error {
 	}
 
 	_, err := h.sendRequest("player/set_play_state", params)
+	return err
+}
+
+func (h *HEOS) GetVolume(pid int) (int, error) {
+	params := map[string]string{
+		"pid": strconv.Itoa(pid),
+	}
+	r, err := h.sendRequest("player/get_volume", params)
+	if err != nil {
+		return 0, err
+	}
+
+	return strconv.Atoi(r.HEOS.Params.Get("level"))
+}
+
+func (h *HEOS) SetVolume(pid int, level int) error {
+	params := map[string]string{
+		"pid":   strconv.Itoa(pid),
+		"level": strconv.Itoa(level),
+	}
+
+	_, err := h.sendRequest("player/set_volume", params)
+	return err
+}
+
+func (h *HEOS) GetMute(pid int) (string, error) {
+	params := map[string]string{
+		"pid": strconv.Itoa(pid),
+	}
+	r, err := h.sendRequest("player/get_mute", params)
+	if err != nil {
+		return "", err
+	}
+
+	return r.HEOS.Params.Get("state"), nil
+}
+
+func (h *HEOS) SetMute(pid int, state string) error {
+	params := map[string]string{
+		"pid":   strconv.Itoa(pid),
+		"state": state,
+	}
+
+	_, err := h.sendRequest("player/set_mute", params)
 	return err
 }
 

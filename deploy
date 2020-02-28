@@ -1,0 +1,8 @@
+#!/bin/bash
+set -e
+go build
+scp Dockerfile heos-helper config.yaml synology:heos-helper/
+ssh synology 'echo $PATH'
+ssh synology sudo /usr/local/bin/docker build -t heos-helper heos-helper
+ssh synology sudo /usr/local/bin/docker rm -f heos-helper
+ssh synology sudo /usr/local/bin/docker run -d --name heos-helper --restart=always -p 8000:8000 -e HEOS_URI=192.168.151.125:1255,192.168.151.124:1255,192.168.151.122:1255 heos-helper

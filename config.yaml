@@ -1,0 +1,11 @@
+topics:
+  system: heos/system/set
+  playback_state: heos/playback/state
+  play: heos/play
+  system_state: heos/system/state
+  state: heos/state
+  info: heos/info
+
+player:
+  -2140325193:
+    sleep_timer: 60

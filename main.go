@@ -1,90 +1,207 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
-	flags "github.com/jessevdk/go-flags"
-	"github.com/martins-home-automation/libs/mediacenter"
-	"github.com/martins-home-automation/libs/mqtthelper"
+	"github.com/gorilla/mux"
 
 	"github.com/coreos/go-systemd/daemon"
-	"github.com/eclipse/paho.mqtt.golang"
+	"github.com/martins-home-automation/libs/mqtthelper"
 )
 
-type Config struct {
-	Topics struct {
-		System        string `yaml:"system"`
-		PlaybackState string `yaml:"playback_state"`
-		Play          string `yaml:"play"`
-		SystemState   string `yaml:"system_state"`
-		State         string `yaml:"state"`
-		Info          string `yaml:"info"`
-	} `yaml:"topics"`
-}
-
-type Info struct {
+type PlayerInfo struct {
+	Name         string `json:"name"`
+	PID          int    `json:"pid"`
+	GID          int    `json:"gid"`
 	Model        string `json:"model"`
 	Version      string `json:"version"`
-	SerialNumber string `json:"serialnumber"`
+	Network      string `json:"network"`
+	Lineout      int    `json:"lineout"`
+	Control      string `json:"control"`
+	SerialNumber string `json:"serial"`
+
+	State    string `json:"state"`
+	Position int    `json:"position"`
+	Duration int    `json:"duration"`
+	Level    int    `json:"level"`
+	Mute     string `json:"mute"`
+
+	Playback Playback `json:"playback"`
+
+	Config PlayerConfig `json:"config"`
+
+	LastUserAction time.Time `json:"last_user_action"`
 }
 
-var cfg = Config{}
-var info = Info{}
-var players []Player
+type PlayState struct {
+	State string `json:"state"`
+}
+
+var heos *HEOS
+var config HeosConfig
+var players []PlayerInfo
 var sources SourceList
 
-var playback = &mediacenter.Playback{
-	Source: "HEOS",
-	State:  "stop",
+func getPlayerByPID(pid int) *PlayerInfo {
+	for idx, item := range players {
+		if item.PID == pid {
+			return &players[idx]
+		}
+	}
+	return nil
+}
+
+func GetPlayers(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(players)
+}
+
+func GetSources(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(sources)
+}
+
+func GetPlayer(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	pid, err := strconv.Atoi(params["pid"])
+	if err == nil {
+		p := getPlayerByPID(pid)
+		json.NewEncoder(w).Encode(p)
+	} else {
+		json.NewEncoder(w).Encode(&Player{})
+	}
+}
+
+func SetPlayState(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	pid, err := strconv.Atoi(params["pid"])
+	if err == nil {
+		p := getPlayerByPID(pid)
+
+		if p != nil {
+
+			decoder := json.NewDecoder(r.Body)
+			var ps PlayState
+			err := decoder.Decode(&ps)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			log.Printf("SetPlayState %v, %v", pid, ps.State)
+			heos.SetPlayState(pid, ps.State)
+			for i := 0; i < 50; i++ {
+				p = getPlayerByPID(pid)
+				if p != nil && ((p.State == "play") == (ps.State == "play")) {
+					break
+				}
+				time.Sleep(time.Millisecond * 100)
+			}
+
+			var response PlayState
+			response.State = p.State
+			json.NewEncoder(w).Encode(&response)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func GetPlayState(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	var response PlayState
+	pid, err := strconv.Atoi(params["pid"])
+	if err == nil {
+		p := getPlayerByPID(pid)
+		if p != nil {
+			log.Printf("GetPlayState %v", pid)
+			response.State = p.State
+			json.NewEncoder(w).Encode(&response)
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusNotFound)
+	response.State = "Not Found"
+	json.NewEncoder(w).Encode(&response)
+}
+
+func sleepTimer(heos *HEOS) {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		<-t.C
+		if heos.IsConnected() {
+			for _, p := range players {
+				if p.Config.SleepTimer != 0 && p.State == "play" {
+					sleepTime := p.LastUserAction.Add(time.Minute * time.Duration(p.Config.SleepTimer))
+					if sleepTime.Before(time.Now()) {
+						level := p.Level
+						for i := 10; i >= 0; i-- {
+							heos.SetVolume(p.PID, level*i/10)
+							time.Sleep(time.Second)
+						}
+
+						heos.SetPlayState(p.PID, "pause")
+						time.Sleep(time.Second)
+						heos.SetVolume(p.PID, level)
+					}
+				}
+			}
+		}
+	}
 }
 
 func main() {
-	var mqttClient mqtt.Client
+	config.read()
 
 	heosURI := os.Getenv("HEOS_URI")
 	if heosURI == "" {
 		panic("No URI for the HEOS capable device found in environment variable HEOS_URI")
 	}
-	mqttURI := os.Getenv("MQTT_URI")
-	if mqttURI == "" {
-		panic("No URI for MQTT found in environment variable MQTT_URI")
-	}
 
-	if err := mqtthelper.ParseConfigOption(&cfg); err != nil {
-		if e, ok := err.(*flags.Error); ok && e.Type == flags.ErrHelp {
-			return
-		}
-		os.Exit(1)
-	}
+	router := mux.NewRouter()
 
-	messageChannel := mqtthelper.NewMessageChannel()
+	router.HandleFunc("/api/source", GetSources).Methods("GET")
+	router.HandleFunc("/api/player", GetPlayers).Methods("GET")
+	router.HandleFunc("/api/player/{pid}", GetPlayer).Methods("GET")
+	router.HandleFunc("/api/player/{pid}/play_state", GetPlayState).Methods("GET")
+	router.HandleFunc("/api/player/{pid}/play_state", SetPlayState).Methods("POST")
+
 	signalChannel := make(chan os.Signal, 1)
 
-	heos := NewHEOS(heosURI)
-	defer heos.Disconnect()
+	heos = NewHEOS(heosURI)
+	err := connect(heos)
 
-	mqttClient, err := mqtthelper.NewClient(mqttURI, func(c mqtt.Client) {
-		mqtthelper.HandleFatalError(mqtthelper.Subscribe(c, cfg.Topics.System, messageChannel))
-		mqtthelper.HandleFatalError(mqtthelper.Subscribe(c, cfg.Topics.PlaybackState, messageChannel))
-		mqtthelper.HandleFatalError(mqtthelper.Subscribe(c, fmt.Sprintf("%s/+", cfg.Topics.Play), messageChannel))
-
-		log.Println("Started agent")
-
-		// Try to connect on start
-		mqtthelper.HandleError(connect(c, heos), "Connect")
-	})
 	if err != nil {
-		log.Fatalf("Could not connect to MQTT at %s: %s", mqttURI, err)
+		log.Printf("connect failed: %v", err)
+		return
 	}
-	defer mqttClient.Disconnect(100)
+
+	go func() {
+		log.Fatal(http.ListenAndServe(":8000", router))
+	}()
+
+	// go func() {
+	// 	t := time.NewTicker(2 * time.Second)
+	// 	defer t.Stop()
+	// 	for {
+	// 		<-t.C
+	// 		if !heos.IsConnected() {
+	// 			log.Printf("Starting reconnect")
+	// 			connect(heos)
+	// 		}
+	// 	}
+
+	// }()
+
+	go sleepTimer(heos)
 
 	daemon.SdNotify(false, "READY=1")
 	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
@@ -92,39 +209,37 @@ func main() {
 	running := true
 	for running {
 		select {
-		case msg := <-messageChannel:
-			switch msg.Topic() {
-			case cfg.Topics.System:
-				setSystemState(mqttClient, heos, msg.Payload())
-			case cfg.Topics.PlaybackState:
-				setPlaybackState(heos, msg.Payload())
-			default:
-				if strings.Index(msg.Topic(), cfg.Topics.Play) == 0 {
-					play(heos, msg.Topic(), msg.Payload())
-				}
-			}
-
 		case event := <-heos.EventCh:
+			log.Printf("Got event: %#v", event)
 			switch event.Type {
 			case "disconnected":
-				updatePlaybackState(mqttClient, "stop")
-				disconnect(mqttClient, heos)
+				disconnect(heos)
+				running = false
 			case "players_changed":
 				if err := updatePlayers(heos); err != nil {
-					disconnect(mqttClient, heos)
+					disconnect(heos)
 					mqtthelper.HandleError(err, "Players changed")
 				}
+			case "player_volume_changed":
+				updatePlayerVolume(heos, event.Params.Get("pid"), event.Params.Get("level"), event.Params.Get("mute"))
 			case "sources_changed":
 				if err := updateSources(heos); err != nil {
-					disconnect(mqttClient, heos)
+					disconnect(heos)
 					mqtthelper.HandleError(err, "Sources changed")
 				}
 			case "player_state_changed":
-				updatePlaybackState(mqttClient, event.Params.Get("state"))
+				updatePlaybackState(heos, event.Params.Get("pid"), event.Params.Get("state"))
+
 			case "player_now_playing_changed":
-				mqtthelper.HandleError(updatePlayback(mqttClient, heos), "Playback")
+				updatePlayback(heos, event.Params.Get("pid"))
+
+			case "groups_changed":
+			case "group_volume_changed":
+
+			case "player_queue_changed":
+
 			case "player_now_playing_progress":
-				updatePlaybackProgress(mqttClient, heos, event.Params.Get("cur_pos"), event.Params.Get("duration"))
+				updatePlaybackProgress(heos, event.Params.Get("pid"), event.Params.Get("cur_pos"), event.Params.Get("duration"))
 			default:
 				log.Printf("Unhandled event: %#v", event)
 			}
@@ -134,98 +249,12 @@ func main() {
 		}
 	}
 
-	disconnect(mqttClient, heos)
+	disconnect(heos)
 }
 
-func setSystemState(m mqtt.Client, h *HEOS, b []byte) {
-	s, err := mqtthelper.ParseSetSystemState(b)
-	if err != nil {
-		mqtthelper.HandleError(err, "Set system state")
-		return
-	}
-
-	switch s {
-	case "connect":
-		mqtthelper.HandleError(connect(m, h), "Connect")
-	case "disconnect":
-		disconnect(m, h)
-	}
-}
-
-func setPlaybackState(h *HEOS, b []byte) {
-	s, err := mediacenter.ParseSetPlaybackState(b)
-	if err != nil {
-		mqtthelper.HandleError(err, "Set playback state")
-		return
-	}
-
-	if !h.IsConnected() {
-		log.Printf("Can't set playback state (%s) when not connected", s)
-		return
-	}
-
-	switch s {
-	case "play":
-		mqtthelper.HandleError(h.SetPlayState(players[0].PID, "play"), "Set playback state (play)")
-	case "pause":
-		mqtthelper.HandleError(h.SetPlayState(players[0].PID, "pause"), "Set playback state (pause)")
-	case "stop":
-		mqtthelper.HandleError(h.SetPlayState(players[0].PID, "stop"), "Set playback state (stop)")
-	case "previous":
-		mqtthelper.HandleError(h.PlayPrevious(players[0].PID), "Set playback state (previous)")
-	case "next":
-		mqtthelper.HandleError(h.PlayNext(players[0].PID), "Set playback state (next)")
-	}
-}
-
-func play(h *HEOS, topic string, b []byte) {
-	k := mediacenter.Kind(topic[strings.LastIndex(topic, "/")+1:])
-
-	p, err := mediacenter.ParsePlay(k, b)
-	if err != nil {
-		mqtthelper.HandleError(err, "Play")
-		return
-	}
-
-	switch p.Kind {
-	case "station":
-		source := sources.Get("TuneIn")
-		if source == nil {
-			mqtthelper.HandleError(errors.New("Source TuneIn not found"), "Play (station)")
-			return
-		}
-
-		criteriaList, err := h.GetSearchCriteria(source.SID)
-		if err != nil {
-			mqtthelper.HandleError(err, "Play (station)")
-			return
-		}
-		criteria := criteriaList.Get("Station")
-		if criteria == nil {
-			mqtthelper.HandleError(errors.New("Criteria for station not found"), "Play (station)")
-			return
-		}
-
-		station := string(p.What.(mediacenter.PlayItemStation))
-		result, err := h.Search(source.SID, criteria.SCID, station, 1, 1)
-		if err != nil {
-			mqtthelper.HandleError(err, "Play (station)")
-			return
-		}
-		if result.Total == 0 {
-			mqtthelper.HandleError(fmt.Errorf("Station '%s' could not be found", station), "Play (station)")
-			return
-		}
-
-		mqtthelper.HandleError(h.PlayStation(players[0].PID, source.SID, result.Result[0].CID, result.Result[0].MID, result.Result[0].Name), "Play (station)")
-	default:
-		log.Printf("Playing of '%s' is not supported", p.Kind)
-	}
-}
-
-func connect(m mqtt.Client, h *HEOS) error {
+func connect(h *HEOS) error {
 	if err := h.Connect(); err != nil {
-		disconnect(m, h)
+		disconnect(h)
 		return err
 	}
 
@@ -234,50 +263,65 @@ func connect(m mqtt.Client, h *HEOS) error {
 	}
 
 	if err := updatePlayers(h); err != nil {
-		disconnect(m, h)
+		log.Printf("updatePlayers failed: %v", err)
+		disconnect(h)
 		return err
 	}
 	if err := updateSources(h); err != nil {
-		disconnect(m, h)
+		log.Printf("updateSources failed: %v", err)
+		disconnect(h)
 		return err
 	}
 
 	if err := h.RegisterForChangeEvents(true); err != nil {
+		log.Printf("RegisterForChangeEvents failed: %v", err)
 		return err
 	}
-
-	mqtthelper.PublishMessage(m, cfg.Topics.SystemState, 0, true, "connected")
-
-	if len(players) > 0 {
-		info.Model = players[0].Model
-		info.Version = players[0].Version
-		info.SerialNumber = players[0].SerialNumber
-		mqtthelper.PublishCustomMessage(m, cfg.Topics.Info, 0, true, info)
-	}
-
-	mqtthelper.HandleError(updatePlayback(m, h), "Playback")
 
 	return nil
 }
 
-func disconnect(m mqtt.Client, h *HEOS) {
+func disconnect(h *HEOS) {
 	if h.IsConnected() {
 		h.RegisterForChangeEvents(false)
 		h.Disconnect()
 	}
-	mqtthelper.PublishMessage(m, cfg.Topics.SystemState, 0, true, "disconnected")
 }
 
 func updatePlayers(h *HEOS) error {
-	p, err := h.GetPlayers()
+	plist, err := h.GetPlayers()
 	if err != nil {
 		return err
 	}
-	if len(p) == 0 {
+	if len(plist) == 0 {
 		return errors.New("No players found, cannot continue")
 	}
 
-	players = p
+	// todo delta update
+	players = nil
+	for _, p := range plist {
+
+		var pinfo = PlayerInfo{
+			PID:            p.PID,
+			GID:            p.GID,
+			Name:           p.Name,
+			Model:          p.Model,
+			Control:        p.Control,
+			Lineout:        p.Lineout,
+			Network:        p.Network,
+			SerialNumber:   p.SerialNumber,
+			Version:        p.Version,
+			Config:         PlayerConfig{SleepTimer: 0},
+			LastUserAction: time.Now(),
+		}
+		if c, ok := config.Player[p.PID]; ok {
+			pinfo.Config = c
+		}
+
+		players = append(players, pinfo)
+
+		updatePlayer(h, p.PID)
+	}
 	return nil
 }
 
@@ -294,86 +338,108 @@ func updateSources(h *HEOS) error {
 	return nil
 }
 
-func updatePlayback(c mqtt.Client, h *HEOS) error {
+func updatePlayer(h *HEOS, pid int) error {
 	if !h.IsConnected() {
-		publishPlayback(c)
 		return nil
 	}
 
-	state, err := h.GetPlayState(players[0].PID)
-	if err != nil {
-		return err
-	}
-	playback.State = state
+	player := getPlayerByPID(pid)
 
-	switch playback.State {
-	case "stop":
-		publishPlayback(c)
+	if player == nil {
 		return nil
-	case "play":
-		playback.Speed = 1
 	}
 
-	p, err := h.GetPlayback(players[0].PID)
+	level, err := h.GetVolume(pid)
 	if err != nil {
 		return err
 	}
+	player.Level = level
 
-	playback.Item = &mediacenter.PlaybackItem{
-		Title: p.Song,
-		Type:  p.Type,
+	mute, err := h.GetMute(pid)
+	if err != nil {
+		return err
+	}
+	player.Mute = mute
+
+	state, err := h.GetPlayState(pid)
+	if err != nil {
+		return err
+	}
+	player.State = state
+
+	if state == "stop" {
+		return nil
 	}
 
-	switch p.Type {
-	case "station":
-		playback.Type = "station"
-		playback.Item.Station = &mediacenter.PlaybackItemStation{
-			Name: p.Station,
-		}
-	case "song":
-		playback.Type = "song"
-		playback.Item.Song = &mediacenter.PlaybackItemSong{
-			Artist: p.Artist,
-			Album:  p.Album,
-		}
+	p, err := h.GetPlayback(pid)
+	if err != nil {
+		return err
 	}
-
-	publishPlayback(c)
+	player.Playback = p
 	return nil
 }
 
-func updatePlaybackState(c mqtt.Client, state string) {
-	playback.State = state
-
-	publishPlayback(c)
+func updatePlaybackState(h *HEOS, pidstr, state string) {
+	pid, _ := strconv.Atoi(pidstr)
+	var player = getPlayerByPID(pid)
+	if player != nil {
+		player.State = state
+		player.LastUserAction = time.Now()
+	}
 }
 
-func updatePlaybackProgress(c mqtt.Client, h *HEOS, elapsed string, duration string) {
+func updatePlayback(h *HEOS, pidstr string) {
+	pid, _ := strconv.Atoi(pidstr)
+	var player = getPlayerByPID(pid)
+	if player != nil {
+		p, err := h.GetPlayback(pid)
+		if err != nil {
+			return
+		}
+		player.Playback = p
+	}
+}
+
+func updatePlaybackProgress(h *HEOS, pidstr, elapsed string, duration string) {
+	pid, _ := strconv.Atoi(pidstr)
+
 	e, err := strconv.Atoi(elapsed)
 	if err != nil {
-		mqtthelper.HandleError(err, "Playback progress (elapsed)")
 		return
 	}
 	d, err := strconv.Atoi(duration)
 	if err != nil {
-		mqtthelper.HandleError(err, "Playback progress (duration)")
 		return
 	}
 
-	playback.Duration = mediacenter.PlaybackDuration(time.Duration(d) * time.Millisecond)
-	if d > 0 {
-		playback.Elapsed = mediacenter.PlaybackDuration(time.Duration(e) * time.Millisecond)
-		playback.StartTime = mediacenter.NewPlaybackTime(time.Now().Add(-playback.Elapsed.Duration()))
-		playback.EndTime = mediacenter.NewPlaybackTime(playback.StartTime.Time().Add(playback.Duration.Duration()))
-	} else {
-		playback.Elapsed = mediacenter.PlaybackDuration(0)
-		playback.StartTime = nil
-		playback.EndTime = nil
+	var player = getPlayerByPID(pid)
+	if player != nil {
+		player.Position = e
+		player.Duration = d
 	}
-
-	publishPlayback(c)
 }
 
-func publishPlayback(c mqtt.Client) {
-	mqtthelper.PublishCustomMessage(c, cfg.Topics.State, 0, true, playback)
+func updatePlayerVolume(h *HEOS, pidstr, level, mute string) {
+	log.Printf("PlayerVolumeChangedEvent %v, %v, %v", pidstr, level, mute)
+	var pid, _ = strconv.Atoi(pidstr)
+	var l, _ = strconv.Atoi(level)
+
+	var player = getPlayerByPID(pid)
+	if player != nil {
+		player.Level = l
+		player.Mute = mute
+		player.LastUserAction = time.Now()
+	}
+
+	var playState, _ = h.GetPlayState(pid)
+	log.Printf("Current PlayState: %v", playState)
+
+	if mute == "on" {
+		h.SetMute(pid, "off")
+		if playState == "play" {
+			h.SetPlayState(pid, "pause")
+		} else {
+			h.SetPlayState(pid, "play")
+		}
+	}
 }
