@@ -9,3 +9,5 @@ topics:
 player:
   -2140325193:
     sleep_timer: 60
+  -1886911098:
+    disable_onetouch: true

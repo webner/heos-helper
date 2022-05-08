@@ -14,7 +14,6 @@ import (
 	"github.com/gorilla/mux"
 
 	"github.com/coreos/go-systemd/daemon"
-	"github.com/martins-home-automation/libs/mqtthelper"
 )
 
 type PlayerInfo struct {
@@ -218,14 +217,12 @@ func main() {
 			case "players_changed":
 				if err := updatePlayers(heos); err != nil {
 					disconnect(heos)
-					mqtthelper.HandleError(err, "Players changed")
 				}
 			case "player_volume_changed":
 				updatePlayerVolume(heos, event.Params.Get("pid"), event.Params.Get("level"), event.Params.Get("mute"))
 			case "sources_changed":
 				if err := updateSources(heos); err != nil {
 					disconnect(heos)
-					mqtthelper.HandleError(err, "Sources changed")
 				}
 			case "player_state_changed":
 				updatePlaybackState(heos, event.Params.Get("pid"), event.Params.Get("state"))
@@ -434,7 +431,7 @@ func updatePlayerVolume(h *HEOS, pidstr, level, mute string) {
 	var playState, _ = h.GetPlayState(pid)
 	log.Printf("Current PlayState: %v", playState)
 
-	if mute == "on" {
+	if mute == "on" && !player.Config.DisableOneTouch {
 		h.SetMute(pid, "off")
 		if playState == "play" {
 			h.SetPlayState(pid, "pause")

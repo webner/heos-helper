@@ -12,7 +12,8 @@ type HeosConfig struct {
 }
 
 type PlayerConfig struct {
-	SleepTimer int `json:"sleep_timer" yaml:"sleep_timer"`
+	SleepTimer      int  `json:"sleep_timer" yaml:"sleep_timer"`
+	DisableOneTouch bool `json:"disable_onetouch" yaml:"disable_onetouch"`
 }
 
 func (c *HeosConfig) read() *HeosConfig {
