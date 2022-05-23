@@ -310,6 +310,7 @@ func (h *HEOS) GetPlayState(pid int) (string, error) {
 }
 
 func (h *HEOS) SetPlayState(pid int, state string) error {
+	log.Printf("Set PlayState: %v", state)
 	params := map[string]string{
 		"pid":   strconv.Itoa(pid),
 		"state": state,

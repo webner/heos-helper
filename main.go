@@ -38,6 +38,7 @@ type PlayerInfo struct {
 	Config PlayerConfig `json:"config"`
 
 	LastUserAction time.Time `json:"last_user_action"`
+	LastOneTouch   time.Time `json:"last_one_touch"`
 }
 
 type PlayState struct {
@@ -431,7 +432,10 @@ func updatePlayerVolume(h *HEOS, pidstr, level, mute string) {
 	var playState, _ = h.GetPlayState(pid)
 	log.Printf("Current PlayState: %v", playState)
 
-	if mute == "on" && !player.Config.DisableOneTouch {
+	debounce := player.LastOneTouch.Add(time.Second).Before(time.Now())
+
+	if mute == "on" && !player.Config.DisableOneTouch && debounce {
+		player.LastOneTouch = time.Now()
 		h.SetMute(pid, "off")
 		if playState == "play" {
 			h.SetPlayState(pid, "pause")
