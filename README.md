@@ -36,11 +36,16 @@ Players are keyed by their HEOS `pid` (see `/api/player`):
 
 ```yaml
 player:
-  -2140325193:
+  -2140325193:               # Schlafzimmer (HEOS 5)
     sleep_timer: 60          # minutes; 0 or missing disables it
-  1588102935:
+  1588102935:                # Denon AVR-X1700H
     disable_onetouch: true   # mute stays mute
 ```
+
+The receiver is only listed while the home cinema plug
+(`switch.homecinema_power_2`) is on, so its entry looks unused most of the
+time. HEOS adds it about 80 seconds after power-on and drops it a few minutes
+after power-off.
 
 When the connection to the speaker drops, the process exits and Kubernetes
 restarts it, which reconnects. Only one instance may run at a time, since two
