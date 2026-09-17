@@ -1,36 +1,31 @@
 # Build stage
-FROM golang:1.21 as builder
+FROM golang:1.27 AS builder
 
-# Set environment variables
 ENV CGO_ENABLED=0 \
     GOOS=linux \
     GOARCH=amd64
 
-# Set the working directory
 WORKDIR /app
 
-# Copy go mod files and download dependencies
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
 COPY . .
 
-# Build the application
-RUN go build -o heos-helper .
+RUN go build -trimpath -ldflags="-s -w" -o heos-helper .
 
-# Final stage - smaller image
-FROM alpine:latest
+# Final stage. Pin the Alpine release: alpine:latest only changes when the
+# image is rebuilt, so it never picked up security fixes on its own anyway.
+FROM alpine:3.24.1
 
-# Set the working directory
 WORKDIR /app
 
-# Copy the compiled binary from the builder stage
 COPY --from=builder /app/heos-helper .
 COPY config.yaml /app/
 
-# Expose port (optional)
+# The helper only reads config.yaml and talks TCP to the speakers.
+USER 65532:65532
+
 EXPOSE 8000
 
-# Start the app
 CMD ["./heos-helper"]

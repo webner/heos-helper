@@ -1,9 +1,11 @@
 module github.com/webner/heos-helper
 
-go 1.17
+go 1.27
 
 require (
-	github.com/coreos/go-systemd v0.0.0-20180321135205-d7b55e18be11
-	github.com/gorilla/mux v1.7.0
-	gopkg.in/yaml.v2 v2.1.1
+	github.com/coreos/go-systemd/v22 v22.7.0
+	github.com/gorilla/mux v1.8.1
+	gopkg.in/yaml.v2 v2.4.0
 )
+
+require golang.org/x/sys v0.48.0 // indirect

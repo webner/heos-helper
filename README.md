@@ -1,87 +1,63 @@
-# HEOS broker for Martin's home automation
+# heos-helper
 
-This broker talks to a [HEOS](https://www.denon-hifi.ch/chg/heos) capable device and uses [MQTT](http://mqtt.org/). It's part of [Martin's home automation](https://github.com/martins-home-automation/libs), but can also be used independently.
+A small HTTP service in front of a Denon [HEOS](https://www.denon.com/heos)
+system. It keeps one connection to the HEOS CLI (TCP port 1255), tracks the
+players' state from change events, and adds two behaviours HEOS does not have:
 
-## Installation
+- **One-touch:** muting a player toggles play/pause instead, and unmutes it
+  again. Useful on speakers whose only button is mute.
+- **Sleep timer:** a playing player with no user action (volume or play state
+  change) for the configured minutes fades out over ten seconds and pauses.
 
-The broker can be run on any host where the HEOS capable device is reachable over the network.
-To run the broker execute this:
+It runs on k3s at `heos-helper.home.arpa:8000` (`192.168.150.202`). Home
+Assistant uses it for the "Kitchen Radio" REST switch.
 
-```
-broker-heos -c path/to/config.yaml
-```
+## HTTP API
 
-## Environment variables
-
-The broker connects to the HEOS capable device with a TCP connection. The address of the device must be set in the environment variable `HEOS_URI`.
+| Method | Path | Returns |
+| --- | --- | --- |
+| `GET` | `/api/player` | All players with state, volume, now playing and config |
+| `GET` | `/api/player/{pid}` | One player |
+| `GET` | `/api/player/{pid}/play_state` | `{"state": "play"}`, or `404` for an unknown player |
+| `POST` | `/api/player/{pid}/play_state` | Body `{"state": "play"}` (`play`, `pause`, `stop`); waits up to five seconds for the player to report the new state and returns it |
+| `GET` | `/api/source` | The HEOS music sources |
 
 ## Configuration
 
-The configuration file looks like this:
+`HEOS_URI` is a comma-separated list of speaker addresses. The first one that
+accepts the connection is used for the whole HEOS system:
+
+```sh
+HEOS_URI=192.168.151.178:1255,192.168.151.123:1255
+```
+
+`config.yaml` is read from the working directory and baked into the image.
+Players are keyed by their HEOS `pid` (see `/api/player`):
 
 ```yaml
-topics:
-  system: heos/system/set
-  playback_state: heos/playback/state
-  play: heos/play
-  system_state: heos/system/state
-  state: heos/state
-  info: heos/info
+player:
+  -2140325193:
+    sleep_timer: 60          # minutes; 0 or missing disables it
+  1588102935:
+    disable_onetouch: true   # mute stays mute
 ```
 
-### System
+When the connection to the speaker drops, the process exits and Kubernetes
+restarts it, which reconnects. Only one instance may run at a time, since two
+would both react to the same mute.
 
-The topic defined in `system` can be used to change the state of the broker.
-The payload is a string of either `connect` or `disconnect`.
+## Build and deploy
 
-When starting the broker it tries to connect to the HEOS capable device immediately.
-When the HEOS capable device shuts down the broker will recognize it automatically and will disconnect.
-During the runtime of the broker it **never** tries to connect to the HEOS capable device until `connect` is sent to the topic defined in `system`.
-
-### System state
-
-The topic defined in `system_state` is used to publish the current state of the broker.
-The payload is a string of either `connected` or `disconnected`.
-
-The messages published to MQTT are retained.
-
-### Playback state
-
-The topic defined in `playback_state` can be used to change the state of the playback in the HEOS capable device.
-The payload is a string of either `play`, `pause`, `stop`, `previous` or `next`.
-
-If the broker is not connected the message will be ignored.
-
-### Play
-
-The base topic defined in `play` can be used to play things in the HEOS capable device.
-
-If the broker is not connected the message will be ignored.
-
-#### Station
-
-Playing a station (radio) is handled in the topic `[play]/station`.
-The payload is a string which defines the name of the station.
-
-Internally the service `TuneIn` on the HEOS capable device is used to search for the given station.
-
-### State
-
-The topic defined in `state` is used to publish the current state/playback of the HEOS capable device.
-
-The messages published to MQTT are retained.
-
-### Info
-
-The topic defined in `info` is used to publish general information about the device.
-The payload is a JSON object as in the following example:
-
-```
-{
-  "model": "",
-  "version": "",
-  "serialnumber": ""
-}
+```sh
+make deploy   # build, push registry.int.ebner.dev/heos-helper:<commit>-amd64, apply k8s/, wait for rollout
+make status
+make logs
 ```
 
-The messages published to MQTT are retained.
+`make deploy` refuses to build from uncommitted changes, because the image tag
+is the commit. The manifest in `k8s/heos-helper.yaml` holds a `:latest`
+placeholder that `make deploy` replaces before applying.
+
+Locally, `./run` builds and starts the helper against the home speakers. It
+connects to the real HEOS system, so one-touch and the sleep timer act on the
+speakers while it runs alongside the cluster instance.

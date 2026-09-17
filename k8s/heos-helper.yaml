@@ -1,0 +1,66 @@
+# heos-helper on k3s-node01, 192.168.150.202:8000 (heos-helper.home.arpa).
+# Used by the Home Assistant "Kitchen Radio" REST switch.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heos-helper
+  namespace: default
+  labels:
+    app: heos-helper
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: the helper acts on speaker events (one-touch
+  # play/pause on mute, sleep timer). Two pods side by side would both react
+  # to the same mute and toggle playback twice.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: heos-helper
+  template:
+    metadata:
+      labels:
+        app: heos-helper
+    spec:
+      containers:
+        - name: heos-helper
+          # Set by `make deploy` to the commit being rolled out.
+          image: registry.int.ebner.dev/heos-helper:latest
+          env:
+            # Tried in order; the first speaker that accepts the connection
+            # is used for the whole HEOS system.
+            - name: HEOS_URI
+              value: 192.168.151.178:1255,192.168.151.123:1255,192.168.151.172:1255,192.168.151.92:1255
+          ports:
+            - name: http
+              containerPort: 8000
+          # The process exits when the speaker connection drops, and the
+          # restart reconnects. Readiness keeps the Service off a pod that
+          # has not finished loading players yet.
+          readinessProbe:
+            httpGet:
+              path: /api/player
+              port: http
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: heos-helper
+  namespace: default
+  annotations:
+    metallb.io/loadBalancerIPs: 192.168.150.202
+spec:
+  type: LoadBalancer
+  selector:
+    app: heos-helper
+  ports:
+    - port: 8000
+      targetPort: http
+      protocol: TCP
